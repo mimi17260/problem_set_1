@@ -1,0 +1,361 @@
+clear
+set more off
+capture clear
+capture log close
+constraint drop _all
+set scheme sj
+*set linesize 150
+eststo clear
+set mat 10000
+
+global adate 	    "2016.01.31"
+*global comp         "/Users/lokendraphadera/Dropbox/"  
+global comp 		"C:/Users/phadera2/Dropbox/" 
+
+cd 					"$comp/Classes/Spring 2016/Applied Econometrics/Problem Set 1/"
+*cd                  "C:/Users/phadera2/Documents/Labor II/Problem Set/"
+pause on
+#delimit;
+
+
+			PART I a: Cluster Simulation
+				     
+	_______________________________________________________________________________________________
+	+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++;
+	
+	***************************************************
+	Generate 100 clusters with 100 observations each
+	***************************************************;
+	drop _all;
+	set obs 100;
+	set seed 1234;
+	
+		gen D = rnormal();
+		gen n = rnormal(); 
+		
+		gen T = D> 0;
+		label var T "Treatment";
+		
+		gen clusterid = _n; 
+		expand(100); 
+		
+		gen e = rnormal(); 
+		gen T_n = T*n; 
+		
+		gen Y = T + n + T_n + e; 
+		
+		bys clusterid (D): gen indid = _n; 
+		
+		tempfile data1;
+		save `data1';
+		
+		*************************************
+			Run Regressions
+		*************************************;
+		
+		eststo clear; 
+		
+		eststo a: reg Y T; 
+		test T =1; 
+		estadd scalar p_val = r(p);
+		
+		eststo b: reg Y T, robust; 
+		test T =1; 
+		estadd scalar p_val = r(p);
+		
+		eststo c: reg Y T, vce(cluster clusterid);
+		test T =1; 
+		estadd scalar p_val = r(p);
+		
+		*---> Run mean regressions;
+		*preserve;
+		collapse (mean) Y T, by(clusterid); 
+		
+		eststo d: reg Y T; 
+		test T =1; 
+		estadd scalar p_val = r(p);
+		
+		eststo e: reg Y T, vce(robust); 
+		test T =1; 
+		estadd scalar p_val = r(p);
+		
+		eststo f: reg Y T, vce(hc2);
+		test T =1; 
+		estadd scalar p_val = r(p);
+		
+		eststo G: reg Y T, vce(hc3);
+		test T =1; 
+		estadd scalar p_val = r(p);
+		*restore; 
+		
+		qui esttab a b c d e f G using "Stata Program and Results/part1a.tex",
+										   r2 se(3) b(3) la ti("Part 1a: Cluster Simulation") replace scalar("p_val H0: T = 1 (p_val)")
+										   nonumbers mtitles("Naive" "Robust" "Cluster" "Naive" "Robust" "HC2" "HC3");
+	
+	*_______________________________________________________________________________________________
+	
+			PART I b: Monte Carlo
+				     
+	_______________________________________________________________________________________________
+	+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++;
+	cap program drop monte;
+		program define monte, rclass; 
+        *version 13.1;
+        syntax [, obs(integer 1)];
+        drop _all;
+        set obs `obs';
+		
+		gen D = rnormal();
+		gen n = rnormal(); 
+		
+		gen T = D> 0;
+		label var T "Treatment";
+		
+		gen clusterid = _n; 
+		expand(100); 
+		
+		gen e = rnormal(); 
+		gen T_n = T*n; 
+		
+		gen Y = T + n + T_n + e; 
+		
+		bys clusterid (D): gen indid = _n; 
+		
+		*************************************
+			Run Regressions
+		*************************************;
+		
+		*---> Naive model; 
+		reg Y T; 
+		
+		test T =1; 
+		local reject1 = r(p) < 0.05; 
+		
+		*---> cluster SE; 
+		reg Y T, vce(cluster clusterid); 
+		
+		test T =1; 
+		local reject2 = r(p) < 0.05;
+		
+		*--> collapse at cluster levels and run the mean regressions;
+		collapse (mean) Y T, by(clusterid); 
+		
+		*---> Naive model; 
+		reg Y T; 
+		
+		test T =1; 
+		local reject3 = r(p) < 0.05; 
+		
+		*---> Robust SE; 
+		reg Y T, vce(robust); 
+		
+		test T =1; 
+		local reject4 = r(p) < 0.05; 
+		
+		*---> HC2 SE; 
+		reg Y T, vce(hc2); 
+		
+		test T =1; 
+		local reject5 = r(p) < 0.05; 
+		
+		*---> HC3 SE; 
+		reg Y T, vce(hc3); 
+		
+		test T =1; 
+		local reject6 = r(p) < 0.05;
+		
+		return scalar reject1 = `reject1';
+		return scalar reject2 = `reject2';
+		return scalar reject3 = `reject3';
+		return scalar reject4 = `reject4';
+		return scalar reject5 = `reject5';
+		return scalar reject6 = `reject6';
+		
+		end; 
+		
+		***************************************
+		Call The Program for Simulation
+		***************************************;
+		simulate reject1=r(reject1) 
+				 reject2=r(reject2)
+				 reject3=r(reject3) 
+				 reject4=r(reject4) 
+				 reject5=r(reject5) 
+				 reject6=r(reject6)
+				 ,reps(1000) seed(1234): monte, obs(100);
+		
+		forv i = 1/6 {; 
+			sum reject`i';
+			local m`i' = r(mean);
+			local s`i' = r(sd);
+			};
+		
+		mat q1b = (`m1', `m2', `m3', `m4', `m5', `m6' \ `s1', `s2', `s3', `s4', `s5', `m6');
+		
+		 matrix rownames q1b = Mean SD;
+		 matrix colnames q1b = Naive Cluster Naive Robust HC2 HC3;
+		 outtable using "Stata Program and Results/part1b", center mat(q1b)  f(%9.3f) replace
+								 cap("Monte Carlo Exercise");
+		
+		mat list q1b;
+				
+		
+	*_______________________________________________________________________________________________
+	
+			PART II : Experimental vs Non-experimental methods
+				     
+	_______________________________________________________________________________________________
+	+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++;
+	
+	***************************************************
+		II a: Experimental Method
+	***************************************************;	
+	
+	*import excel using "PSET1-2016.xlsx", firstrow clear;
+	
+	use "Stata Program and Results/PSET1-2016",clear; 
+	
+	local controls "vote00 vote98 newreg age female persons"; 
+	*a;
+	drop if treat_real==.; 
+	
+	tabstat vote02 `controls', by(treat_real); 
+	
+	reg treat_real `controls'; 
+	test (persons =0) (vote00=0) (vote98=0) (newreg=0) (age=0) (female=0);
+	
+	*b;
+	*(i) ITT; 
+	
+	eststo bia: reg vote02 treat_real, vce(robust);
+	eststo bib: reg vote02 treat_real `controls', vce(robust); 
+	
+	*(ii) First Stage;
+	
+	eststo fs: reg contact treat_real `controls', vce(robust); 
+	
+	*(iii) 2sls LATE;
+	eststo twosls: ivregress 2sls vote02 (contact = treat_real) `controls', vce(robust); 
+		qui estat firststage; 
+		mat temp =  r(singleresults);
+		local fs_f = temp[1,4];
+		qui estadd scalar fs_f  =  `fs_f';
+			
+	*Control Function; 
+	
+	reg contact treat_real `controls', vce(robust);
+		predict u, resid; 
+		
+	eststo cont_f: reg vote02 contact vote00 vote98 newreg age female persons u, vce(robust); 
+	
+	esttab bib cont_f fs twosls using "Stata Program and Results/part2biii.tex",
+										   r2 se(3) b(3) la ti("Part 2b: ITT and Control Function Vs 2SLS") replace scalar("fs_f First-Stage F_Val")
+										   nonumbers mtitles("ITT" "Control Function" "First-Stage" "2SLS");
+	
+	
+	esttab bib cont_f fs twosls,r2 se(3) b(3) la ti("Part 2b: ITT and Control Function Vs 2SLS") scalar("fs_f First-Stage F_Val")
+										   nonumbers mtitles("ITT" "Control Function" "First-Stage" "2SLS");
+										   
+										   
+	
+	
+	***************************************************
+		II b: Non-Experimental Method
+	***************************************************;	
+	
+	*c; 
+	foreach x of local controls {; 
+		gen contact_`x' = contact*`x'; 
+		}; 
+		
+	eststo q2c1: reg vote02 contact, vce(robust); 
+	eststo q2c2: reg vote02 contact `controls', vce(robust);
+	eststo q2c3: reg vote02 contact `controls' contact_*, vce(robust);
+	
+     
+	esttab q2c1 q2c2 q2c3 using "Stata Program and Results/part2c.tex",
+										   r2 se(3) b(3) la ti("Part 2c: Difference in voting behavior") replace;
+	
+	
+	esttab q2c1 q2c2 q2c3, r2 se(3) b(3) la ti("Part 2c: Difference in voting behavior");
+	
+	*d; 
+	
+	*(i); 
+	probit contact `controls'; 
+		predict double p_score; 
+		
+	*ii; 
+	twoway (kdensity p_score, lwidth(medthick)) (kdensity p_score, bw(0.05) lwidth(medthick)) (kdensity p_score, kernel(triangle) lwidth(medthick)), 
+		ytitle("") xtitle("") legend(label(1 "Epanechnikov optimal") label(2 "Epanechnikov BW =0.05") 
+		label(3 "Traingle optimal") size(small) col(2)) name(q2diia,replace);
+	
+	
+	twoway (kdensity p_score if contact==1, lwidth(medthick)) (kdensity p_score if contact ==0, lwidth(medthick)), 
+		ytitle("") xtitle("") legend(label(1 "Contacted") label(2 "Not contacted") size(small) col(2)) name(q2diib,replace);
+
+		
+	graph combine q2diia q2diib, 
+		title("Propensity Score", span size(medium))
+		saving("Stata Program and Results/p_score.gph",replace); 
+		
+		
+
+	*iii; *--> need to ask about the formula; 
+	
+	gen weight = p_score/(1-p_score); 
+	gen vote02_d1 = vote02*weight; 
+	
+	total vote02_d1 if contact==1; 
+	local a = _b[vote02_d1]; 
+	
+	total vote02_d1 if contact==0; 
+	local b = _b[vote02_d1]; 
+	
+	mean vote02 if contact==1; 
+	local c = _b[vote02]; 
+	
+	local beta = `c' - (`b'/`a'); 
+	
+	di `beta'; 
+	
+	
+	*iv; 
+	gen pwt = contact + (1 - contact)*weight; 
+	
+	reg vote02 contact `controls' [aw=pwt];
+	reg vote02 contact `controls' [aw=pwt], vce(robust);
+	
+	*v
+	*i. matching on controls; 
+	psmatch2 contact `controls', out(vote02) com;
+	
+	*ii. matching on p-score; 
+	psmatch2 contact, out(vote02) p(p_score) com;
+	
+	*VI
+	*1). single nearest-neighbor matching with replacement; 
+	psmatch2 contact `controls', out(vote02) n(1) com;
+	
+	*2). Stratification matching - i am matching within strata then taking average; 
+	*assume it is stratified by age; 
+	
+	recode age (18/25 = 1) (26/35 = 2) (36/45 = 3) (46/65 = 4) (65/108 = 5), gen(agecat); 
+	
+		g att = .;
+        levels agecat, local(gr);
+        qui foreach j of local gr {;
+                psmatch2 contact `controls' if agecat==`j', out(vote02);
+                replace att = r(att) if  agecat==`j';
+				};
+        sum att; 
+	
+	*3) radius matching;
+	
+	  psmatch2 contact `controls', radius out(vote02) com;
+	 
+	 *4) kernel matching with a Gaussian (normal) kernel;
+	  psmatch2 contact `controls', out(vote02) com kernel kerneltype(normal); 
+	
+	
+	
